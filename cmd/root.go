@@ -12,7 +12,7 @@ var rootCmd = &cobra.Command{
 	Use:          "hitminer-file-manager",
 	Short:        "hitminer-file-manager client",
 	Long:         "hitminer-file-manager client, it can be used to manage hitminer file systems remotely",
-	Version:      "1.3.0",
+	Version:      version,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

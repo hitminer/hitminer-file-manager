@@ -43,7 +43,7 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	fileChan := make(chan string, 1)
 	go func(fileChan chan<- string) {
 		defer close(fileChan)
-		_ = svr.listLocalFile(ctx, filePath, fileChan)
+		svr.listLocalFile(ctx, filePath, fileChan)
 	}(fileChan)
 
 	// filepath: aa/bb/[..]  object: cc/dd   -> cc/dd/..
@@ -107,38 +107,38 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	return svr.mg.GetError()
 }
 
-// if when exited, return true
-func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan chan<- string) bool {
+func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan chan<- string) {
 	st, err := os.Stat(dir)
 	if err == nil {
 		if !st.IsDir() {
 			select {
 			case fileChan <- dir:
-				return false
 			case <-ctx.Done():
-				return true
 			}
+			return
 		}
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		svr.mg.AppendError(err)
-		return false
+		return
 	}
 	for _, ent := range entries {
 		if ent.IsDir() {
-			if svr.listLocalFile(ctx, filepath.Join(dir, ent.Name()), fileChan) {
-				return true
+			svr.listLocalFile(ctx, filepath.Join(dir, ent.Name()), fileChan)
+			select {
+			case <-ctx.Done():
+				return
+			default:
 			}
 		} else {
 			select {
 			case fileChan <- filepath.Join(dir, ent.Name()):
 			case <-ctx.Done():
-				return true
+				return
 			}
 		}
 	}
-	return false
 }
 
 func (svr *S3Server) putObject(ctx context.Context, size int64, objectName string, reader io.Reader) error {

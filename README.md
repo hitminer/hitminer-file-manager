@@ -114,3 +114,14 @@ Usage:
 Flags:
   -h, --help   help for mkdir
 ```
+
+## upgrade
+```
+Upgrade hitminer file manager to the latest versions
+
+Usage:
+  hitminer-file-manager upgrade [flags]
+
+Flags:
+  -h, --help   help for upgrade
+```
