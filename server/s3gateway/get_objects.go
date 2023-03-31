@@ -14,6 +14,7 @@ import (
 
 func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string) error {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
+	objectName = filepath.ToSlash(objectName)
 	objectName = strings.TrimPrefix(objectName, "/")
 	// filepath.Clean会删除最后的/
 	if strings.HasSuffix(objectName, "/") {
@@ -21,6 +22,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 	} else {
 		objectName = filepath.Clean(objectName)
 	}
+	objectName = filepath.ToSlash(objectName)
 
 	if objectName == "." {
 		return fmt.Errorf("illegal path")
@@ -48,7 +50,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 				go func() {
 					defer svr.mg.Done()
 					var localPath string
-					if strings.HasSuffix(filePath, separator) || filePath == "." {
+					if strings.HasSuffix(filePath, string(os.PathSeparator)) || filePath == "." {
 						if !strings.HasSuffix(originalObjectName, "/") {
 							// filepath: aa/bb/ object: cc/dd[/..]  -> aa/bb/dd/..
 							p := 0
@@ -106,7 +108,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 		go func() {
 			defer svr.mg.Done()
 			var localPath string
-			if strings.HasSuffix(filePath, separator) || filePath == "." {
+			if strings.HasSuffix(filePath, string(os.PathSeparator)) || filePath == "." {
 				// filepath: aa/bb/ object: cc/dd       -> aa/bb/dd
 				p := 0
 				if filepath.Dir(originalObjectName) != "." {

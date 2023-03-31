@@ -10,8 +10,10 @@ import (
 )
 
 func (svr *S3Server) MakeDirectory(ctx context.Context, objectName string) error {
+	objectName = filepath.ToSlash(objectName)
 	objectName = strings.TrimPrefix(objectName, "/")
 	objectName = filepath.Clean(objectName)
+	objectName = filepath.ToSlash(objectName)
 	if !strings.HasSuffix(objectName, "/") {
 		objectName = objectName + "/"
 	}

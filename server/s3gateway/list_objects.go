@@ -27,8 +27,10 @@ type object struct {
 
 func (svr *S3Server) ListObjects(ctx context.Context, prefix string, out io.Writer) error {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
+	prefix = filepath.ToSlash(prefix)
 	prefix = strings.TrimPrefix(prefix, "/")
 	prefix = filepath.Clean(prefix)
+	prefix = filepath.ToSlash(prefix)
 	if prefix == "." {
 		prefix = ""
 	}

@@ -11,6 +11,7 @@ import (
 
 func (svr *S3Server) RemoveObjects(ctx context.Context, objectName string, recursive bool) error {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
+	objectName = filepath.ToSlash(objectName)
 	objectName = strings.TrimPrefix(objectName, "/")
 	// filepath.Clean会删除最后的/
 	if strings.HasSuffix(objectName, "/") {
@@ -18,6 +19,7 @@ func (svr *S3Server) RemoveObjects(ctx context.Context, objectName string, recur
 	} else {
 		objectName = filepath.Clean(objectName)
 	}
+	objectName = filepath.ToSlash(objectName)
 
 	if !strings.HasSuffix(objectName, "/") {
 		if ok, _ := svr.headObject(ctx, objectName); !ok {

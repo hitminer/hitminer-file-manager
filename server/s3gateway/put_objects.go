@@ -32,6 +32,7 @@ type part struct {
 
 func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string) error {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
+	objectName = filepath.ToSlash(objectName)
 	objectName = strings.TrimPrefix(objectName, "/")
 	// filepath.Clean会删除最后的/
 	if strings.HasSuffix(objectName, "/") {
@@ -39,6 +40,7 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	} else {
 		objectName = filepath.Clean(objectName)
 	}
+	objectName = filepath.ToSlash(objectName)
 
 	fileChan := make(chan string, 1)
 	go func(fileChan chan<- string) {
