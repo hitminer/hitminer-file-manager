@@ -3,9 +3,12 @@ package s3gateway
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
+	md5simd "github.com/minio/md5-simd"
 	"hitminer-file-manager/util"
+	"hitminer-file-manager/util/multibar"
 	"io"
 	"net/http"
 	"net/url"
@@ -48,10 +51,23 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 		svr.listLocalFile(ctx, filePath, fileChan)
 	}(fileChan)
 
+	listObjects := make(map[string]object)
+	for object := range svr.listObjects(ctx, objectName, "") {
+		listObjects[object.FullPath] = object
+	}
+
+	haveUploads, err := svr.listMultipartUploads(ctx, objectName)
+	if err != nil {
+		svr.mg.AppendError(err)
+		haveUploads = make(map[string]string)
+	}
+
+	md5Sever := md5simd.NewServer()
+	defer md5Sever.Close()
 	// filepath: aa/bb/[..]  object: cc/dd   -> cc/dd/..
 	// filepath: aa/bb/[..]  object: cc/dd/  -> cc/dd/..
 	// filepath: aa/bb[/..]  object: cc/dd   -> cc/dd/..
-	// filepath: aa/bb[/..]  object: cc/dd/  -> cc/dd/..
+	// filepath: aa/bb[/..]  object: cc/dd/  -> cc/dd/bb/..
 	// filepath: aa/bb       object: cc/dd   -> cc/dd
 	// filepath: aa/bb       object: cc/dd/  -> cc/dd/bb
 	for fp := range fileChan {
@@ -69,35 +85,75 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 					remotePath = filepath.ToSlash(objectName)
 				}
 			} else {
-				// filepath: aa/bb/[..]  object: cc/dd   -> cc/dd/..
-				// filepath: aa/bb/[..]  object: cc/dd/  -> cc/dd/..
-				// filepath: aa/bb[/..]  object: cc/dd   -> cc/dd/..
-				// filepath: aa/bb[/..]  object: cc/dd/  -> cc/dd/..
-				remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[len(filePath):]))
+				if strings.HasSuffix(objectName, "/") {
+					// filepath: aa/bb[/..]  object: cc/dd/  -> cc/dd/bb..
+					p := 0
+					if filepath.Dir(filePath) != "." {
+						p = len(filepath.Dir(filePath))
+					}
+					remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[p:]))
+				} else {
+					// filepath: aa/bb/[..]  object: cc/dd   -> cc/dd/..
+					// filepath: aa/bb/[..]  object: cc/dd/  -> cc/dd/..
+					// filepath: aa/bb[/..]  object: cc/dd   -> cc/dd/..
+					remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[len(filePath):]))
+				}
 			}
 
-			f, err := os.Open(fullPath)
+			stat, err := os.Stat(fullPath)
 			if err != nil {
 				svr.mg.AppendError(err)
 				return
 			}
-			defer func() {
-				_ = f.Close()
-			}()
-			stat, err := f.Stat()
-			if err != nil {
-				svr.mg.AppendError(err)
-				return
+
+			// 判断是否上传过
+			if lastUploadInfo, ok := listObjects[remotePath]; ok {
+				etag := util.TrimEtag(lastUploadInfo.ETag)
+				f, err := os.Open(fullPath)
+				if err != nil {
+					svr.mg.AppendError(err)
+					return
+				}
+				defer func() {
+					_ = f.Close()
+				}()
+				reader := multibar.NewBarReader(f, stat.Size(), fmt.Sprintf("upload check: %s", remotePath))
+				index := strings.Index(etag, "-")
+				if index == -1 {
+					md5Hash := md5Sever.NewHash()
+					defer md5Hash.Close()
+					_, _ = io.Copy(md5Hash, reader)
+					if etag == hex.EncodeToString(md5Hash.Sum(nil)) {
+						// 不用上传
+						return
+					}
+				} else {
+					etag = etag[:index]
+					md5HashSum := md5Sever.NewHash()
+					defer md5HashSum.Close()
+					chunkSize := util.Max(minChunkSize, stat.Size()/maxChunkNum)
+					for offset := int64(0); offset < stat.Size(); offset = offset + chunkSize {
+						partReader := io.LimitReader(reader, chunkSize)
+						md5Hash := md5Sever.NewHash()
+						_, _ = io.Copy(md5Hash, partReader)
+						_, _ = md5HashSum.Write(md5Hash.Sum(nil))
+						md5Hash.Close()
+					}
+					if etag == hex.EncodeToString(md5HashSum.Sum(nil)) {
+						// 不用上传
+						return
+					}
+				}
 			}
 
 			if stat.Size() <= smallFileSize {
-				err := svr.putObject(ctx, stat.Size(), remotePath, f)
+				err := svr.putObject(ctx, stat.Size(), remotePath, fullPath)
 				if err != nil {
 					svr.mg.AppendError(err)
 					return
 				}
 			} else {
-				err := svr.multiUpload(ctx, stat.Size(), remotePath, "", f)
+				err := svr.multiUpload(ctx, stat.Size(), remotePath, fullPath, haveUploads[remotePath])
 				if err != nil {
 					svr.mg.AppendError(err)
 					return
@@ -105,7 +161,9 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 			}
 		}()
 	}
+
 	svr.mg.Finish()
+	multibar.Wait()
 	return svr.mg.GetError()
 }
 
@@ -143,14 +201,18 @@ func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan cha
 	}
 }
 
-func (svr *S3Server) putObject(ctx context.Context, size int64, objectName string, reader io.Reader) error {
+func (svr *S3Server) putObject(ctx context.Context, size int64, objectName, localPath string) error {
 	reqUrl := &url.URL{
 		Scheme: "https",
 		Host:   svr.host,
 		Path:   "/s3/" + objectName,
 	}
 
-	bar := util.NewBarReader(reader, size, fmt.Sprintf("upload: %s", objectName))
+	reader, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	bar := multibar.NewBarReader(reader, size, fmt.Sprintf("upload: %s", objectName))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqUrl.String(), bar)
 	if err != nil {
 		return err
@@ -172,8 +234,7 @@ func (svr *S3Server) putObject(ctx context.Context, size int64, objectName strin
 	return nil
 }
 
-func (svr *S3Server) multiUpload(ctx context.Context, size int64, objectName, uploadId string, reader io.Reader) error {
-	reader = util.NewBarReader(reader, size, fmt.Sprintf("upload: %s", objectName))
+func (svr *S3Server) multiUpload(ctx context.Context, size int64, objectName, localPath, uploadId string) error {
 	parts := make(map[int]*part, 0)
 start:
 	if uploadId == "" {
@@ -183,16 +244,67 @@ start:
 		}
 		uploadId = id
 	} else {
-		mp, err := svr.listMultiUpload(ctx, uploadId, objectName)
+		mp, err := svr.listMultipart(ctx, uploadId, objectName)
 		if err != nil {
 			uploadId = ""
 			goto start
 		}
 		parts = mp
 	}
-
+	num, offset := 1, int64(0)
 	chunkSize := util.Max(minChunkSize, size/maxChunkNum)
-	for num, offset := 1, int64(0); offset < size; num, offset = num+1, offset+chunkSize {
+	haveCheck := int64(0)
+
+	if len(parts) != 0 {
+		f, err := os.Open(localPath)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = f.Close()
+		}()
+
+		sumCheckSize := int64(0)
+		for _, v := range parts {
+			sumCheckSize += int64(v.Size)
+		}
+		checkReader := multibar.NewBarReader(f, sumCheckSize, fmt.Sprintf("upload check: %s", objectName))
+
+		checkParts := make(map[int]*part, 0)
+		md5Sever := md5simd.NewServer()
+		defer md5Sever.Close()
+		for ; offset < size; num, offset = num+1, offset+chunkSize {
+			part, ok := parts[num]
+			if !ok {
+				break
+			}
+			partReader := io.LimitReader(checkReader, chunkSize)
+			md5Hash := md5Sever.NewHash()
+			_, _ = io.Copy(md5Hash, partReader)
+			etag := hex.EncodeToString(md5Hash.Sum(nil))
+			md5Hash.Close()
+			if util.TrimEtag(part.Etag) != etag {
+				break
+			}
+			checkParts[num] = part
+			haveCheck += int64(part.Size)
+		}
+		parts = checkParts
+	}
+
+	f, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+	_, err = f.Seek(haveCheck, io.SeekStart)
+	if err != nil {
+		return err
+	}
+	reader := multibar.NewBarReader(f, size-haveCheck, fmt.Sprintf("upload: %s", objectName))
+	for ; offset < size; num, offset = num+1, offset+chunkSize {
 		partReader := io.LimitReader(reader, chunkSize)
 		etag, err := svr.uploadPart(ctx, uploadId, objectName, num, partReader)
 		if err != nil {
@@ -205,7 +317,7 @@ start:
 		}
 	}
 
-	err := svr.completeMultiUpload(ctx, uploadId, objectName, parts)
+	err = svr.completeMultiUpload(ctx, uploadId, objectName, parts)
 	if err != nil {
 		return err
 	}
@@ -257,7 +369,7 @@ func (svr *S3Server) initMultiUpload(ctx context.Context, objectName string) (st
 	return r.UploadId, nil
 }
 
-func (svr *S3Server) listMultiUpload(ctx context.Context, uploadId, objectName string) (map[int]*part, error) {
+func (svr *S3Server) listMultipart(ctx context.Context, uploadId, objectName string) (map[int]*part, error) {
 	query := url.Values{}
 	query.Add("uploadId", uploadId)
 
@@ -298,10 +410,11 @@ func (svr *S3Server) listMultiUpload(ctx context.Context, uploadId, objectName s
 	}
 
 	parts := make(map[int]*part)
-	for i, p := range r.Part {
+	for _, p := range r.Part {
 		t, _ := time.Parse("2006-01-02T15:04:05Z07:00", p.LastModified)
 		p.LastModifiedTime = t
-		parts[i] = p
+		p.Etag = util.TrimEtag(p.Etag)
+		parts[p.PartNumber] = p
 	}
 
 	return parts, nil
@@ -392,4 +505,59 @@ func (svr *S3Server) completeMultiUpload(ctx context.Context, uploadId, objectNa
 	}
 
 	return nil
+}
+
+func (svr *S3Server) listMultipartUploads(ctx context.Context, prefix string) (map[string]string, error) {
+	query := url.Values{}
+	query.Add("prefix", prefix)
+	query.Add("uploads", "")
+
+	reqUrl := &url.URL{
+		Scheme:   "https",
+		Host:     svr.host,
+		Path:     "/s3/",
+		RawQuery: query.Encode(),
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Authorization", "Bearer "+svr.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	type listUpload struct {
+		ListUpload []struct {
+			Key       string   `json:"key"`
+			UploadIds []string `json:"uploadIds"`
+		} `json:"ListUpload"`
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request error: %d", resp.StatusCode)
+	}
+
+	r := &listUpload{}
+
+	b, _ := io.ReadAll(resp.Body)
+	err = jsoniter.Unmarshal(b, r)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[string]string)
+	for _, u := range r.ListUpload {
+		if len(u.UploadIds) > 0 {
+			ret[u.Key] = u.UploadIds[0]
+		}
+	}
+
+	return ret, nil
 }

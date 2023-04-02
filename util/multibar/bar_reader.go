@@ -1,4 +1,4 @@
-package util
+package multibar
 
 import (
 	"github.com/vbauerster/mpb/v8"
@@ -28,4 +28,9 @@ func NewBarReader(reader io.Reader, size int64, description string) io.Reader {
 			decor.EwmaSpeed(decor.UnitKiB, "% .2f", 60),
 		))
 	return bar.ProxyReader(reader)
+}
+
+func Wait() {
+	time.Sleep(300 * time.Millisecond)
+	// p.Wait()
 }

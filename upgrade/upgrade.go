@@ -3,7 +3,7 @@ package upgrade
 import (
 	"context"
 	"fmt"
-	"hitminer-file-manager/util"
+	"hitminer-file-manager/util/multibar"
 	"io"
 	"net/http"
 	"os"
@@ -40,7 +40,7 @@ func Upgrade(ctx context.Context) error {
 		_ = os.Remove(tempPath)
 	}()
 
-	bar := util.NewBarReader(resp.Body, resp.ContentLength, "upgrade")
+	bar := multibar.NewBarReader(resp.Body, resp.ContentLength, "upgrade")
 	_, err = io.Copy(f, bar)
 	if err != nil {
 		return err
