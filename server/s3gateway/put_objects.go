@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/hitminer/hitminer-file-manager/server"
+	"github.com/hitminer/hitminer-file-manager/util"
+	"github.com/hitminer/hitminer-file-manager/util/multibar"
 	jsoniter "github.com/json-iterator/go"
 	md5simd "github.com/minio/md5-simd"
-	"hitminer-file-manager/util"
-	"hitminer-file-manager/util/multibar"
 	"io"
 	"net/http"
 	"net/url"
@@ -51,8 +52,8 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 		svr.listLocalFile(ctx, filePath, fileChan)
 	}(fileChan)
 
-	listObjects := make(map[string]object)
-	for object := range svr.listObjects(ctx, objectName, "") {
+	listObjects := make(map[string]server.Object)
+	for object := range svr.ListObjects(ctx, objectName, "") {
 		listObjects[object.FullPath] = object
 	}
 
@@ -64,12 +65,12 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 
 	md5Sever := md5simd.NewServer()
 	defer md5Sever.Close()
-	// filepath: aa/bb/[..]  object: cc/dd   -> cc/dd/..
-	// filepath: aa/bb/[..]  object: cc/dd/  -> cc/dd/..
-	// filepath: aa/bb[/..]  object: cc/dd   -> cc/dd/..
-	// filepath: aa/bb[/..]  object: cc/dd/  -> cc/dd/bb/..
-	// filepath: aa/bb       object: cc/dd   -> cc/dd
-	// filepath: aa/bb       object: cc/dd/  -> cc/dd/bb
+	// filepath: aa/bb/[..]  Object: cc/dd   -> cc/dd/..
+	// filepath: aa/bb/[..]  Object: cc/dd/  -> cc/dd/..
+	// filepath: aa/bb[/..]  Object: cc/dd   -> cc/dd/..
+	// filepath: aa/bb[/..]  Object: cc/dd/  -> cc/dd/bb/..
+	// filepath: aa/bb       Object: cc/dd   -> cc/dd
+	// filepath: aa/bb       Object: cc/dd/  -> cc/dd/bb
 	for fp := range fileChan {
 		fullPath := fp
 		svr.mg.Add()
@@ -78,24 +79,24 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 			var remotePath string
 			if fullPath == filePath {
 				if strings.HasSuffix(objectName, "/") {
-					// filepath: aa/bb       object: cc/dd/  -> cc/dd/bb
+					// filepath: aa/bb       Object: cc/dd/  -> cc/dd/bb
 					remotePath = filepath.ToSlash(filepath.Join(objectName, filepath.Base(fullPath)))
 				} else {
-					// filepath: aa/bb       object: cc/dd   -> cc/dd
+					// filepath: aa/bb       Object: cc/dd   -> cc/dd
 					remotePath = filepath.ToSlash(objectName)
 				}
 			} else {
 				if strings.HasSuffix(objectName, "/") {
-					// filepath: aa/bb[/..]  object: cc/dd/  -> cc/dd/bb..
+					// filepath: aa/bb[/..]  Object: cc/dd/  -> cc/dd/bb..
 					p := 0
 					if filepath.Dir(filePath) != "." {
 						p = len(filepath.Dir(filePath))
 					}
 					remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[p:]))
 				} else {
-					// filepath: aa/bb/[..]  object: cc/dd   -> cc/dd/..
-					// filepath: aa/bb/[..]  object: cc/dd/  -> cc/dd/..
-					// filepath: aa/bb[/..]  object: cc/dd   -> cc/dd/..
+					// filepath: aa/bb/[..]  Object: cc/dd   -> cc/dd/..
+					// filepath: aa/bb/[..]  Object: cc/dd/  -> cc/dd/..
+					// filepath: aa/bb[/..]  Object: cc/dd   -> cc/dd/..
 					remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[len(filePath):]))
 				}
 			}

@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/hitminer/hitminer-file-manager/login"
+	"github.com/hitminer/hitminer-file-manager/server"
+	"github.com/hitminer/hitminer-file-manager/server/s3gateway"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"hitminer-file-manager/login"
-	"hitminer-file-manager/server"
-	"hitminer-file-manager/server/s3gateway"
 )
 
 var putCmd = &cobra.Command{

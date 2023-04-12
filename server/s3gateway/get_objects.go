@@ -3,7 +3,7 @@ package s3gateway
 import (
 	"context"
 	"fmt"
-	"hitminer-file-manager/util/multibar"
+	"github.com/hitminer/hitminer-file-manager/util/multibar"
 	"io"
 	"net/http"
 	"net/url"
@@ -31,19 +31,19 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 	// 判断objectName是一个对象还是文件夹
 	originalObjectName := objectName
 	if !strings.HasSuffix(objectName, "/") {
-		if ok, _ := svr.headObject(ctx, objectName); !ok {
+		if ok, _ := svr.HeadObject(ctx, objectName); !ok {
 			objectName = objectName + "/"
 		}
 	}
 
-	// filepath: aa/bb/ object: cc/dd[/..]  -> aa/bb/dd/..
-	// filepath: aa/bb/ object: cc/dd/[..]  -> aa/bb/..
-	// filepath: aa/bb/ object: cc/dd       -> aa/bb/dd
-	// filepath: aa/bb  object: cc/dd[/..]  -> aa/bb/..
-	// filepath: aa/bb  object: cc/dd/[..]  -> aa/bb/..
-	// filepath: aa/bb  object: cc/dd       -> aa/bb
+	// filepath: aa/bb/ Object: cc/dd[/..]  -> aa/bb/dd/..
+	// filepath: aa/bb/ Object: cc/dd/[..]  -> aa/bb/..
+	// filepath: aa/bb/ Object: cc/dd       -> aa/bb/dd
+	// filepath: aa/bb  Object: cc/dd[/..]  -> aa/bb/..
+	// filepath: aa/bb  Object: cc/dd/[..]  -> aa/bb/..
+	// filepath: aa/bb  Object: cc/dd       -> aa/bb
 	if strings.HasSuffix(objectName, "/") {
-		for obj := range svr.listObjects(ctx, objectName, "") {
+		for obj := range svr.ListObjects(ctx, objectName, "") {
 			object := obj
 			if !object.IsDirectory && !strings.HasSuffix(object.FullPath, "/") {
 				svr.mg.Add()
@@ -52,19 +52,19 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 					var localPath string
 					if strings.HasSuffix(filePath, string(os.PathSeparator)) || filePath == "." {
 						if !strings.HasSuffix(originalObjectName, "/") {
-							// filepath: aa/bb/ object: cc/dd[/..]  -> aa/bb/dd/..
+							// filepath: aa/bb/ Object: cc/dd[/..]  -> aa/bb/dd/..
 							p := 0
 							if filepath.Dir(originalObjectName) != "." {
 								p = len(filepath.Dir(originalObjectName))
 							}
 							localPath = filepath.Join(filePath, object.FullPath[p:])
 						} else {
-							// filepath: aa/bb/ object: cc/dd/[..]  -> aa/bb/..
+							// filepath: aa/bb/ Object: cc/dd/[..]  -> aa/bb/..
 							localPath = filepath.Join(filePath, object.FullPath[len(objectName):])
 						}
 					} else {
-						// filepath: aa/bb  object: cc/dd[/..]  -> aa/bb/..
-						// filepath: aa/bb  object: cc/dd/[..]  -> aa/bb/..
+						// filepath: aa/bb  Object: cc/dd[/..]  -> aa/bb/..
+						// filepath: aa/bb  Object: cc/dd/[..]  -> aa/bb/..
 						localPath = filepath.Join(filePath, object.FullPath[len(objectName):])
 					}
 					st, err := os.Stat(localPath)
@@ -109,14 +109,14 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 			defer svr.mg.Done()
 			var localPath string
 			if strings.HasSuffix(filePath, string(os.PathSeparator)) || filePath == "." {
-				// filepath: aa/bb/ object: cc/dd       -> aa/bb/dd
+				// filepath: aa/bb/ Object: cc/dd       -> aa/bb/dd
 				p := 0
 				if filepath.Dir(originalObjectName) != "." {
 					p = len(filepath.Dir(originalObjectName))
 				}
 				localPath = filepath.Join(filePath, objectName[p:])
 			} else {
-				// filepath: aa/bb  object: cc/dd       -> aa/bb
+				// filepath: aa/bb  Object: cc/dd       -> aa/bb
 				localPath = filepath.Join(filePath, objectName[len(objectName):])
 			}
 			st, err := os.Stat(localPath)
@@ -150,7 +150,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 				_ = f.Close()
 			}()
 
-			_, size := svr.headObject(ctx, objectName)
+			_, size := svr.HeadObject(ctx, objectName)
 			bar := multibar.NewBarReader(body, size, "download: "+localPath)
 			_, _ = io.Copy(f, bar)
 		}()

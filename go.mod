@@ -1,10 +1,11 @@
-module hitminer-file-manager
+module github.com/hitminer/hitminer-file-manager
 
 go 1.20
 
 require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/json-iterator/go v1.1.12
+	github.com/minio/md5-simd v1.1.2
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/viper v1.15.0
 	github.com/vbauerster/mpb/v8 v8.1.4
@@ -19,7 +20,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
-	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

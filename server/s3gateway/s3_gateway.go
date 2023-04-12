@@ -2,7 +2,7 @@ package s3gateway
 
 import (
 	"context"
-	"hitminer-file-manager/util/manager"
+	"github.com/hitminer/hitminer-file-manager/util/manager"
 )
 
 type S3Server struct {

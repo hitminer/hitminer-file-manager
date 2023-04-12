@@ -1,12 +1,11 @@
 package s3gateway
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"github.com/dustin/go-humanize"
+	"github.com/hitminer/hitminer-file-manager/server"
+	"github.com/hitminer/hitminer-file-manager/util"
 	jsoniter "github.com/json-iterator/go"
-	"hitminer-file-manager/util"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,17 +14,12 @@ import (
 	"time"
 )
 
-type object struct {
-	FullPath         string `json:"FullPath"`
-	Name             string `json:"Name"`
-	LastModified     string `json:"LastModified"`
-	LastModifiedTime time.Time
-	Size             int    `json:"Size"`
-	IsDirectory      bool   `json:"IsDirectory"`
-	ETag             string `json:"Etag"`
+func (svr *S3Server) GetError() error {
+	svr.mg.Finish()
+	return svr.mg.GetError()
 }
 
-func (svr *S3Server) ListObjects(ctx context.Context, prefix string, out io.Writer) error {
+func (svr *S3Server) ListObjects(ctx context.Context, prefix, delimiter string) <-chan server.Object {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
 	prefix = filepath.ToSlash(prefix)
 	prefix = strings.TrimPrefix(prefix, "/")
@@ -39,35 +33,9 @@ func (svr *S3Server) ListObjects(ctx context.Context, prefix string, out io.Writ
 		prefix = prefix + "/"
 	}
 
-	loc := time.Now().Location()
-	for object := range svr.listObjects(ctx, prefix, "/") {
-		var buffer bytes.Buffer
-		if object.IsDirectory {
-			buffer.WriteString("drwxr-xr-x\t")
-			buffer.WriteString(fmt.Sprintf("%9s\t", humanize.IBytes(uint64(object.Size))))
-			buffer.WriteString(object.LastModifiedTime.In(loc).Format("Jan _2 15:04"))
-			buffer.WriteString("\t")
-			buffer.WriteString(object.Name)
-			buffer.WriteString("\n")
-		} else {
-			buffer.WriteString("-rwxr-xr--\t")
-			buffer.WriteString(fmt.Sprintf("%9s\t", humanize.IBytes(uint64(object.Size))))
-			buffer.WriteString(object.LastModifiedTime.In(loc).Format("Jan 02 15:04"))
-			buffer.WriteString("\t")
-			buffer.WriteString(object.Name)
-			buffer.WriteString("\n")
-		}
-		_, _ = out.Write(buffer.Bytes())
-	}
+	objectCh := make(chan server.Object, 1)
 
-	svr.mg.Finish()
-	return svr.mg.GetError()
-}
-
-func (svr *S3Server) listObjects(ctx context.Context, prefix, delimiter string) <-chan object {
-	objectCh := make(chan object, 1)
-
-	go func(objectCh chan<- object) {
+	go func(objectCh chan<- server.Object) {
 		defer close(objectCh)
 		// Save continuationToken for next request.
 		var continuationToken string
@@ -83,7 +51,7 @@ func (svr *S3Server) listObjects(ctx context.Context, prefix, delimiter string) 
 			for _, object := range objects {
 				object.ETag = util.TrimEtag(object.ETag)
 				select {
-				// Send object content.
+				// Send Object content.
 				case objectCh <- *object:
 				// If receives done from the caller, return here.
 				case <-ctx.Done():
@@ -103,7 +71,7 @@ func (svr *S3Server) listObjects(ctx context.Context, prefix, delimiter string) 
 	return objectCh
 }
 
-func (svr *S3Server) listObjectsReq(ctx context.Context, prefix, delimiter, continuationToken string) ([]*object, string, error) {
+func (svr *S3Server) listObjectsReq(ctx context.Context, prefix, delimiter, continuationToken string) ([]*server.Object, string, error) {
 	query := url.Values{}
 	query.Add("list-type", "2")
 	query.Add("prefix", prefix)
@@ -140,8 +108,8 @@ func (svr *S3Server) listObjectsReq(ctx context.Context, prefix, delimiter, cont
 	}
 
 	type ret struct {
-		NextContinuationToken string    `json:"NextContinuationToken"`
-		Objects               []*object `json:"Objects"`
+		NextContinuationToken string           `json:"NextContinuationToken"`
+		Objects               []*server.Object `json:"Objects"`
 	}
 	r := &ret{}
 

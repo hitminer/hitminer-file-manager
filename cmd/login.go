@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"github.com/hitminer/hitminer-file-manager/login"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"hitminer-file-manager/login"
 	"os"
 	"path/filepath"
 )

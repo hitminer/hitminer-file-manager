@@ -6,7 +6,7 @@ import (
 	"net/url"
 )
 
-func (svr *S3Server) headObject(ctx context.Context, objectName string) (bool, int64) {
+func (svr *S3Server) HeadObject(ctx context.Context, objectName string) (bool, int64) {
 	reqUrl := &url.URL{
 		Scheme: "https",
 		Host:   svr.host,

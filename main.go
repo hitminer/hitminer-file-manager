@@ -1,6 +1,6 @@
 package main
 
-import "hitminer-file-manager/cmd"
+import "github.com/hitminer/hitminer-file-manager/cmd"
 
 func main() {
 	cmd.Execute()

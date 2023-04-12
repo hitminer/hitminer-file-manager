@@ -4,8 +4,8 @@
 package cmd
 
 import (
+	"github.com/hitminer/hitminer-file-manager/upgrade"
 	"github.com/spf13/cobra"
-	"hitminer-file-manager/upgrade"
 )
 
 var upgradeCmd = &cobra.Command{

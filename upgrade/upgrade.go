@@ -3,7 +3,7 @@ package upgrade
 import (
 	"context"
 	"fmt"
-	"hitminer-file-manager/util/multibar"
+	"github.com/hitminer/hitminer-file-manager/util/multibar"
 	"io"
 	"net/http"
 	"os"

@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/dustin/go-humanize"
+	"github.com/hitminer/hitminer-file-manager/login"
+	"github.com/hitminer/hitminer-file-manager/server"
+	"github.com/hitminer/hitminer-file-manager/server/s3gateway"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"hitminer-file-manager/login"
-	"hitminer-file-manager/server"
-	"hitminer-file-manager/server/s3gateway"
+	"time"
 )
 
 var lsCmd = &cobra.Command{
@@ -37,7 +40,27 @@ The directory of the dataset has a prefix "dataset/".`,
 		}
 
 		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token)
-		err = svr.ListObjects(cmd.Context(), args[0], cmd.OutOrStdout())
+		loc := time.Now().Location()
+		for object := range svr.ListObjects(cmd.Context(), args[0], "/") {
+			var buffer bytes.Buffer
+			if object.IsDirectory {
+				buffer.WriteString("drwxr-xr-x\t")
+				buffer.WriteString(fmt.Sprintf("%9s\t", humanize.IBytes(uint64(object.Size))))
+				buffer.WriteString(object.LastModifiedTime.In(loc).Format("Jan _2 15:04"))
+				buffer.WriteString("\t")
+				buffer.WriteString(object.Name)
+				buffer.WriteString("\n")
+			} else {
+				buffer.WriteString("-rwxr-xr--\t")
+				buffer.WriteString(fmt.Sprintf("%9s\t", humanize.IBytes(uint64(object.Size))))
+				buffer.WriteString(object.LastModifiedTime.In(loc).Format("Jan 02 15:04"))
+				buffer.WriteString("\t")
+				buffer.WriteString(object.Name)
+				buffer.WriteString("\n")
+			}
+			_, _ = cmd.OutOrStdout().Write(buffer.Bytes())
+		}
+		err = svr.GetError()
 		if err != nil {
 			return err
 		}
