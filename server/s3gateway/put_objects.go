@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/hitminer/hitminer-file-manager/server"
 	"github.com/hitminer/hitminer-file-manager/util"
-	"github.com/hitminer/hitminer-file-manager/util/multibar"
 	jsoniter "github.com/json-iterator/go"
 	md5simd "github.com/minio/md5-simd"
 	"io"
@@ -118,7 +117,7 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 				defer func() {
 					_ = f.Close()
 				}()
-				reader := multibar.NewBarReader(f, stat.Size(), fmt.Sprintf("upload check: %s", remotePath))
+				reader := svr.bar.NewBarReader(f, stat.Size(), fmt.Sprintf("upload check: %s", remotePath))
 				index := strings.Index(etag, "-")
 				if index == -1 {
 					md5Hash := md5Sever.NewHash()
@@ -164,7 +163,7 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	}
 
 	svr.mg.Finish()
-	multibar.Wait()
+	svr.bar.Wait()
 	return svr.mg.GetError()
 }
 
@@ -213,7 +212,7 @@ func (svr *S3Server) putObject(ctx context.Context, size int64, objectName, loca
 	if err != nil {
 		return err
 	}
-	bar := multibar.NewBarReader(reader, size, fmt.Sprintf("upload: %s", objectName))
+	bar := svr.bar.NewBarReader(reader, size, fmt.Sprintf("upload: %s", objectName))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqUrl.String(), bar)
 	if err != nil {
 		return err
@@ -269,7 +268,7 @@ start:
 		for _, v := range parts {
 			sumCheckSize += int64(v.Size)
 		}
-		checkReader := multibar.NewBarReader(f, sumCheckSize, fmt.Sprintf("upload check: %s", objectName))
+		checkReader := svr.bar.NewBarReader(f, sumCheckSize, fmt.Sprintf("upload check: %s", objectName))
 
 		checkParts := make(map[int]*part, 0)
 		md5Sever := md5simd.NewServer()
@@ -304,7 +303,7 @@ start:
 	if err != nil {
 		return err
 	}
-	reader := multibar.NewBarReader(f, size-haveCheck, fmt.Sprintf("upload: %s", objectName))
+	reader := svr.bar.NewBarReader(f, size-haveCheck, fmt.Sprintf("upload: %s", objectName))
 	for ; offset < size; num, offset = num+1, offset+chunkSize {
 		partReader := io.LimitReader(reader, chunkSize)
 		etag, err := svr.uploadPart(ctx, uploadId, objectName, num, partReader)

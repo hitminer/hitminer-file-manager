@@ -1,4 +1,4 @@
-package multibar
+package cmdbar
 
 import (
 	"github.com/vbauerster/mpb/v8"
@@ -7,21 +7,21 @@ import (
 	"time"
 )
 
-var p *mpb.Progress
-var closed bool
-
-func init() {
-	p = mpb.New(
-		mpb.WithRefreshRate(200 * time.Millisecond),
-	)
-	closed = false
+type CmdBar struct {
+	p *mpb.Progress
 }
 
-func NewBarReader(reader io.Reader, size int64, description string) io.Reader {
-	if closed {
-		return reader
+func NewBar(w io.Writer) *CmdBar {
+	return &CmdBar{
+		p: mpb.New(
+			mpb.WithRefreshRate(200*time.Millisecond),
+			mpb.WithOutput(w),
+		),
 	}
-	bar := p.New(size,
+}
+
+func (b *CmdBar) NewBarReader(reader io.Reader, size int64, description string) io.Reader {
+	bar := b.p.New(size,
 		mpb.BarStyle().Rbound("|"),
 		mpb.PrependDecorators(
 			decor.Name(description, decor.WCSyncSpaceR),
@@ -35,12 +35,7 @@ func NewBarReader(reader io.Reader, size int64, description string) io.Reader {
 	return bar.ProxyReader(reader)
 }
 
-func Close() {
-	closed = true
-	p = nil
-}
-
-func Wait() {
+func (b *CmdBar) Wait() {
 	time.Sleep(300 * time.Millisecond)
 	// p.Wait()
 }

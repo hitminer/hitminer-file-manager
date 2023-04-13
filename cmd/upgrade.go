@@ -13,7 +13,7 @@ var upgradeCmd = &cobra.Command{
 	Short: "Upgrade hitminer file manager",
 	Long:  "Upgrade hitminer file manager to the latest versions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := upgrade.Upgrade(cmd.Context())
+		err := upgrade.Upgrade(cmd.Context(), cmd.OutOrStdout())
 		if err != nil {
 			return err
 		}

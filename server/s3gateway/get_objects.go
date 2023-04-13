@@ -3,7 +3,6 @@ package s3gateway
 import (
 	"context"
 	"fmt"
-	"github.com/hitminer/hitminer-file-manager/util/multibar"
 	"io"
 	"net/http"
 	"net/url"
@@ -98,7 +97,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 						_ = f.Close()
 					}()
 
-					bar := multibar.NewBarReader(body, int64(object.Size), "download: "+localPath)
+					bar := svr.bar.NewBarReader(body, int64(object.Size), "download: "+localPath)
 					_, _ = io.Copy(f, bar)
 				}()
 			}
@@ -151,13 +150,13 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 			}()
 
 			_, size := svr.HeadObject(ctx, objectName)
-			bar := multibar.NewBarReader(body, size, "download: "+localPath)
+			bar := svr.bar.NewBarReader(body, size, "download: "+localPath)
 			_, _ = io.Copy(f, bar)
 		}()
 	}
 
 	svr.mg.Finish()
-	multibar.Wait()
+	svr.bar.Wait()
 	return svr.mg.GetError()
 }
 

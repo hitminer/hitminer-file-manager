@@ -3,14 +3,14 @@ package upgrade
 import (
 	"context"
 	"fmt"
-	"github.com/hitminer/hitminer-file-manager/util/multibar"
+	"github.com/hitminer/hitminer-file-manager/util/multibar/cmdbar"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 )
 
-func Upgrade(ctx context.Context) error {
+func Upgrade(ctx context.Context, w io.Writer) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -40,7 +40,8 @@ func Upgrade(ctx context.Context) error {
 		_ = os.Remove(tempPath)
 	}()
 
-	bar := multibar.NewBarReader(resp.Body, resp.ContentLength, "upgrade")
+	b := cmdbar.NewBar(w)
+	bar := b.NewBarReader(resp.Body, resp.ContentLength, "upgrade")
 	_, err = io.Copy(f, bar)
 	if err != nil {
 		return err

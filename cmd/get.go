@@ -5,6 +5,7 @@ import (
 	"github.com/hitminer/hitminer-file-manager/login"
 	"github.com/hitminer/hitminer-file-manager/server"
 	"github.com/hitminer/hitminer-file-manager/server/s3gateway"
+	"github.com/hitminer/hitminer-file-manager/util/multibar/cmdbar"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -42,7 +43,7 @@ The directory of the dataset has a prefix "dataset/".`,
 			return err
 		}
 
-		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token)
+		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token, cmdbar.NewBar(cmd.OutOrStdout()))
 		err = svr.GetObjects(cmd.Context(), loacl, remote)
 		if err != nil {
 			return err

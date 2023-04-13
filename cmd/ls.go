@@ -7,6 +7,7 @@ import (
 	"github.com/hitminer/hitminer-file-manager/login"
 	"github.com/hitminer/hitminer-file-manager/server"
 	"github.com/hitminer/hitminer-file-manager/server/s3gateway"
+	"github.com/hitminer/hitminer-file-manager/util/multibar/cmdbar"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"time"
@@ -39,7 +40,7 @@ The directory of the dataset has a prefix "dataset/".`,
 			return err
 		}
 
-		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token)
+		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token, cmdbar.NewBar(cmd.OutOrStdout()))
 		loc := time.Now().Location()
 		for object := range svr.ListObjects(cmd.Context(), args[0], "/") {
 			var buffer bytes.Buffer
