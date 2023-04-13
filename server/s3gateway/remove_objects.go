@@ -24,6 +24,8 @@ func (svr *S3Server) RemoveObjects(ctx context.Context, objectName string, recur
 	if !strings.HasSuffix(objectName, "/") {
 		if ok, _ := svr.HeadObject(ctx, objectName); !ok {
 			return fmt.Errorf("not exist file: %s", objectName)
+		} else {
+			recursive = false
 		}
 	}
 
