@@ -97,7 +97,11 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 						_ = f.Close()
 					}()
 
-					bar := svr.bar.NewBarReader(body, int64(object.Size), "download: "+localPath)
+					rel, _ := filepath.Rel(filePath, localPath)
+					if rel == "" {
+						rel = filepath.Base(localPath)
+					}
+					bar := svr.bar.NewBarReader(body, int64(object.Size), fmt.Sprintf("download: %s,", rel))
 					_, _ = io.Copy(f, bar)
 				}()
 			}
@@ -150,7 +154,12 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 			}()
 
 			_, size := svr.HeadObject(ctx, objectName)
-			bar := svr.bar.NewBarReader(body, size, "download: "+localPath)
+
+			rel, _ := filepath.Rel(filePath, localPath)
+			if rel == "" {
+				rel = filepath.Base(localPath)
+			}
+			bar := svr.bar.NewBarReader(body, size, fmt.Sprintf("download: %s,", rel))
 			_, _ = io.Copy(f, bar)
 		}()
 	}
