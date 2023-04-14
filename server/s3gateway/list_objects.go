@@ -62,9 +62,10 @@ func (svr *S3Server) ListObjects(ctx context.Context, prefix, delimiter string) 
 			// If continuation token present, save it for next request.
 			if nextContinuationToken != "" {
 				continuationToken = nextContinuationToken
+			} else {
+				break
 			}
 
-			break
 		}
 	}(objectCh)
 
@@ -124,5 +125,5 @@ func (svr *S3Server) listObjectsReq(ctx context.Context, prefix, delimiter, cont
 		object.LastModifiedTime = t
 	}
 
-	return r.Objects, "", nil
+	return r.Objects, r.NextContinuationToken, nil
 }

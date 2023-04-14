@@ -37,5 +37,5 @@ func (b *CmdBar) NewBarReader(reader io.Reader, size int64, description string) 
 
 func (b *CmdBar) Wait() {
 	time.Sleep(300 * time.Millisecond)
-	// p.Wait()
+	//b.p.Shutdown()
 }
