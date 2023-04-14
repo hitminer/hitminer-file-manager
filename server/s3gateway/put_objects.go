@@ -44,6 +44,9 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 		objectName = filepath.Clean(objectName)
 	}
 	objectName = filepath.ToSlash(objectName)
+	if objectName == "." {
+		objectName = ""
+	}
 
 	fileChan := make(chan string, 1)
 	go func(fileChan chan<- string) {
@@ -77,7 +80,7 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 			defer svr.mg.Done()
 			var remotePath string
 			if fullPath == filePath {
-				if strings.HasSuffix(objectName, "/") {
+				if strings.HasSuffix(objectName, "/") || objectName == "" {
 					// filepath: aa/bb       Object: cc/dd/  -> cc/dd/bb
 					remotePath = filepath.ToSlash(filepath.Join(objectName, filepath.Base(fullPath)))
 				} else {
@@ -85,7 +88,7 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 					remotePath = filepath.ToSlash(objectName)
 				}
 			} else {
-				if strings.HasSuffix(objectName, "/") {
+				if strings.HasSuffix(objectName, "/") || objectName == "" {
 					// filepath: aa/bb[/..]  Object: cc/dd/  -> cc/dd/bb..
 					p := 0
 					if filepath.Dir(filePath) != "." {

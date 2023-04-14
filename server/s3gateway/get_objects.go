@@ -24,12 +24,12 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 	objectName = filepath.ToSlash(objectName)
 
 	if objectName == "." {
-		return fmt.Errorf("illegal path")
+		objectName = ""
 	}
 
 	// 判断objectName是一个对象还是文件夹
 	originalObjectName := objectName
-	if !strings.HasSuffix(objectName, "/") {
+	if !strings.HasSuffix(objectName, "/") && objectName != "" {
 		if ok, _ := svr.HeadObject(ctx, objectName); !ok {
 			objectName = objectName + "/"
 		}
@@ -41,7 +41,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 	// filepath: aa/bb  Object: cc/dd[/..]  -> aa/bb/..
 	// filepath: aa/bb  Object: cc/dd/[..]  -> aa/bb/..
 	// filepath: aa/bb  Object: cc/dd       -> aa/bb
-	if strings.HasSuffix(objectName, "/") {
+	if strings.HasSuffix(objectName, "/") || objectName == "" {
 		for obj := range svr.ListObjects(ctx, objectName, "") {
 			object := obj
 			if !object.IsDirectory && !strings.HasSuffix(object.FullPath, "/") {
@@ -50,7 +50,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 					defer svr.mg.Done()
 					var localPath string
 					if strings.HasSuffix(filePath, string(os.PathSeparator)) || filePath == "." {
-						if !strings.HasSuffix(originalObjectName, "/") {
+						if !strings.HasSuffix(originalObjectName, "/") && originalObjectName != "" {
 							// filepath: aa/bb/ Object: cc/dd[/..]  -> aa/bb/dd/..
 							p := 0
 							if filepath.Dir(originalObjectName) != "." {
@@ -101,7 +101,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 					if rel == "" {
 						rel = filepath.Base(localPath)
 					}
-					bar := svr.bar.NewBarReader(body, int64(object.Size), fmt.Sprintf("download: %s,", rel))
+					bar := svr.bar.NewBarReader(body, int64(object.Size), fmt.Sprintf("download: %s", rel))
 					_, _ = io.Copy(f, bar)
 				}()
 			}
@@ -159,7 +159,7 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 			if rel == "" {
 				rel = filepath.Base(localPath)
 			}
-			bar := svr.bar.NewBarReader(body, size, fmt.Sprintf("download: %s,", rel))
+			bar := svr.bar.NewBarReader(body, size, fmt.Sprintf("download: %s", rel))
 			_, _ = io.Copy(f, bar)
 		}()
 	}
