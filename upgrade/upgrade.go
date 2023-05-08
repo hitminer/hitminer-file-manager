@@ -2,7 +2,6 @@ package upgrade
 
 import (
 	"context"
-	"fmt"
 	"github.com/hitminer/hitminer-file-manager/util/multibar/cmdbar"
 	"io"
 	"net/http"
@@ -16,7 +15,10 @@ func Upgrade(ctx context.Context, w io.Writer) error {
 		return err
 	}
 	name := filepath.Base(executable)
-	tempPath := filepath.Join(filepath.Dir(executable), fmt.Sprintf(".%s.new", name))
+	stat, err := os.Stat(executable)
+	if err != nil {
+		return err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl, nil)
 	if err != nil {
@@ -31,23 +33,43 @@ func Upgrade(ctx context.Context, w io.Writer) error {
 		_ = resp.Body.Close()
 	}()
 
-	f, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY, 0755)
+	tempDir, err := os.MkdirTemp("", "hitminer")
 	if err != nil {
 		return err
 	}
 	defer func() {
-		_ = f.Close()
-		_ = os.Remove(tempPath)
+		_ = os.RemoveAll(tempDir)
 	}()
 
-	b := cmdbar.NewBar(w)
-	bar := b.NewBarReader(resp.Body, resp.ContentLength, "upgrade")
-	_, err = io.Copy(f, bar)
+	downloadFile, err := os.OpenFile(filepath.Join(tempDir, filepath.Base(downloadUrl)), os.O_RDWR|os.O_CREATE|os.O_EXCL, stat.Mode())
 	if err != nil {
 		return err
 	}
 
-	err = os.Rename(tempPath, executable)
+	b := cmdbar.NewBar(w)
+	bar := b.NewBarReader(resp.Body, resp.ContentLength, "upgrade")
+	_, err = io.Copy(downloadFile, bar)
+	if err != nil {
+		_ = downloadFile.Close()
+		return err
+	}
+
+	err = downloadFile.Close()
+	if err != nil {
+		return err
+	}
+
+	oldName := filepath.Join(tempDir, name+".old")
+	err = os.MkdirAll(filepath.Dir(oldName), 0755)
+	if err != nil {
+		return err
+	}
+	err = os.Rename(executable, oldName)
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(downloadFile.Name(), executable)
 	if err != nil {
 		return err
 	}
