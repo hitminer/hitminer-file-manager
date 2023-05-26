@@ -5,6 +5,7 @@ import (
 	"github.com/hitminer/hitminer-file-manager/login"
 	"github.com/hitminer/hitminer-file-manager/server"
 	"github.com/hitminer/hitminer-file-manager/server/s3gateway"
+	"github.com/hitminer/hitminer-file-manager/util/multibar"
 	"github.com/hitminer/hitminer-file-manager/util/multibar/cmdbar"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -18,11 +19,11 @@ Please note that The directory of the project data has a prefix "project/{projec
 The directory of the dataset has a prefix "dataset/".`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var remote string
-		loacl := "."
+		local := "."
 		if len(args) == 1 {
 			remote = args[0]
 		} else if len(args) == 2 {
-			remote, loacl = args[0], args[1]
+			remote, local = args[0], args[1]
 		} else {
 			return cmd.Help()
 		}
@@ -43,8 +44,12 @@ The directory of the dataset has a prefix "dataset/".`,
 			return err
 		}
 
-		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token, cmdbar.NewBar(cmd.OutOrStdout()))
-		err = svr.GetObjects(cmd.Context(), loacl, remote)
+		var multiBar multibar.MultiBar
+		if ok, _ := cmd.Flags().GetBool("print"); ok {
+			multiBar = cmdbar.NewBar(cmd.OutOrStdout())
+		}
+		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token, multiBar)
+		err = svr.GetObjects(cmd.Context(), local, remote)
 		if err != nil {
 			return err
 		}
@@ -54,4 +59,5 @@ The directory of the dataset has a prefix "dataset/".`,
 
 func init() {
 	rootCmd.AddCommand(getCmd)
+	getCmd.Flags().BoolP("print", "p", true, "print process bar")
 }

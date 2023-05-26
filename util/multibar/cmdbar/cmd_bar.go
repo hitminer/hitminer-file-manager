@@ -28,9 +28,9 @@ func (b *CmdBar) NewBarReader(reader io.Reader, size int64, description string) 
 			decor.CountersKibiByte("% .2f / % .2f"),
 		),
 		mpb.AppendDecorators(
-			decor.EwmaETA(decor.ET_STYLE_GO, 90),
+			decor.AverageETA(decor.ET_STYLE_GO),
 			decor.Name(" ] "),
-			decor.EwmaSpeed(decor.UnitKiB, "% .2f", 60),
+			decor.AverageSpeed(decor.UnitKiB, "% .2f"),
 		))
 	return bar.ProxyReader(reader)
 }

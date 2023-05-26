@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"github.com/hitminer/hitminer-file-manager/server"
 	"github.com/hitminer/hitminer-file-manager/util"
+	"github.com/hitminer/hitminer-file-manager/util/md5pool"
 	jsoniter "github.com/json-iterator/go"
-	md5simd "github.com/minio/md5-simd"
 	"io"
 	"net/http"
 	"net/url"
@@ -65,8 +65,6 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 		haveUploads = make(map[string]string)
 	}
 
-	md5Sever := md5simd.NewServer()
-	defer md5Sever.Close()
 	// filepath: aa/bb/[..]  Object: cc/dd   -> cc/dd/..
 	// filepath: aa/bb/[..]  Object: cc/dd/  -> cc/dd/..
 	// filepath: aa/bb[/..]  Object: cc/dd   -> cc/dd/..
@@ -123,8 +121,8 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 				reader := svr.bar.NewBarReader(f, stat.Size(), fmt.Sprintf("upload check: %s", remotePath))
 				index := strings.Index(etag, "-")
 				if index == -1 {
-					md5Hash := md5Sever.NewHash()
-					defer md5Hash.Close()
+					md5Hash := md5pool.New()
+					defer md5pool.Put(md5Hash)
 					_, _ = io.Copy(md5Hash, reader)
 					if etag == hex.EncodeToString(md5Hash.Sum(nil)) {
 						// 不用上传
@@ -132,15 +130,16 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 					}
 				} else {
 					etag = etag[:index]
-					md5HashSum := md5Sever.NewHash()
-					defer md5HashSum.Close()
+					md5HashSum := md5pool.New()
+					defer md5pool.Put(md5HashSum)
+					md5Hash := md5pool.New()
+					defer md5pool.Put(md5Hash)
 					chunkSize := util.Max(minChunkSize, stat.Size()/maxChunkNum)
 					for offset := int64(0); offset < stat.Size(); offset = offset + chunkSize {
 						partReader := io.LimitReader(reader, chunkSize)
-						md5Hash := md5Sever.NewHash()
 						_, _ = io.Copy(md5Hash, partReader)
 						_, _ = md5HashSum.Write(md5Hash.Sum(nil))
-						md5Hash.Close()
+						md5Hash.Reset()
 					}
 					if etag == hex.EncodeToString(md5HashSum.Sum(nil)) {
 						// 不用上传
@@ -274,18 +273,17 @@ start:
 		checkReader := svr.bar.NewBarReader(f, sumCheckSize, fmt.Sprintf("upload check: %s", objectName))
 
 		checkParts := make(map[int]*part, 0)
-		md5Sever := md5simd.NewServer()
-		defer md5Sever.Close()
+		md5Hash := md5pool.New()
+		defer md5pool.Put(md5Hash)
 		for ; offset < size; num, offset = num+1, offset+chunkSize {
 			part, ok := parts[num]
 			if !ok {
 				break
 			}
 			partReader := io.LimitReader(checkReader, chunkSize)
-			md5Hash := md5Sever.NewHash()
 			_, _ = io.Copy(md5Hash, partReader)
 			etag := hex.EncodeToString(md5Hash.Sum(nil))
-			md5Hash.Close()
+			md5Hash.Reset()
 			if util.TrimEtag(part.Etag) != etag {
 				break
 			}
