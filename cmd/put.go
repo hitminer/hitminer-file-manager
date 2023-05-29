@@ -40,8 +40,9 @@ The directory of the dataset has a prefix "dataset/".`,
 		if ok, _ := cmd.Flags().GetBool("print"); ok {
 			multiBar = cmdbar.NewBar(cmd.OutOrStdout())
 		}
+		erofs, _ := cmd.Flags().GetBool("erofs")
 		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token, multiBar)
-		err = svr.PutObjects(cmd.Context(), args[0], args[1])
+		err = svr.PutObjects(cmd.Context(), args[0], args[1], erofs)
 		if err != nil {
 			return err
 		}
@@ -52,4 +53,5 @@ The directory of the dataset has a prefix "dataset/".`,
 func init() {
 	rootCmd.AddCommand(putCmd)
 	putCmd.Flags().BoolP("print", "p", true, "print process bar")
+	putCmd.Flags().BoolP("erofs", "e", false, "erofs upload")
 }
