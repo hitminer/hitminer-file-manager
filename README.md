@@ -1,3 +1,5 @@
+# hitminer-file-manager
+
 ## root
 
 ```
@@ -86,7 +88,9 @@ Usage:
   hitminer-file-manager put [local_path] [remote_path] [flags]
 
 Flags:
-  -h, --help   help for put
+  -e, --erofs   erofs upload
+  -h, --help    help for put
+  -p, --print   print process bar (default true)
 ```
 
 ## get
@@ -100,6 +104,7 @@ Usage:
 
 Flags:
   -h, --help   help for get
+  -p, --print   print process bar (default true)
 ```
 
 ## mkdir

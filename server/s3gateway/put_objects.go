@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/hitminer/hitminer-file-manager/ero"
 	"github.com/hitminer/hitminer-file-manager/server"
 	"github.com/hitminer/hitminer-file-manager/util"
 	"github.com/hitminer/hitminer-file-manager/util/md5pool"
@@ -13,7 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +36,7 @@ type part struct {
 	Size             int `json:"Size"`
 }
 
-func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string) error {
+func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string, erofs bool) error {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
 	objectName = filepath.ToSlash(objectName)
 	objectName = strings.TrimPrefix(objectName, "/")
@@ -46,6 +49,22 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	objectName = filepath.ToSlash(objectName)
 	if objectName == "." {
 		objectName = ""
+	}
+	if filePath == "." {
+		filePath, _ = os.Getwd()
+	}
+
+	if erofs {
+		svr.erofsUpload(ctx, filePath, objectName)
+		svr.mg.Finish()
+		svr.bar.Wait()
+		return svr.mg.GetError()
+	}
+
+	fileCnt, fileTotalSize := svr.CalcUploadFile(ctx, filePath)
+	if fileCnt > 128 && (fileTotalSize/fileCnt) <= 32*1024*1024 {
+		svr.bar.NewCntBar(fileCnt, "upload files")
+		svr.bar.SetPrint(false)
 	}
 
 	fileChan := make(chan string, 1)
@@ -76,6 +95,9 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 		svr.mg.Add()
 		go func() {
 			defer svr.mg.Done()
+			defer func() {
+				_, _ = svr.bar.Write(nil)
+			}()
 			var remotePath string
 			if fullPath == filePath {
 				if strings.HasSuffix(objectName, "/") || objectName == "" {
@@ -201,6 +223,45 @@ func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan cha
 			}
 		}
 	}
+}
+
+// CalcUploadFile return file cnt and total file size
+func (svr *S3Server) CalcUploadFile(ctx context.Context, dir string) (int64, int64) {
+	st, err := os.Stat(dir)
+	if err == nil {
+		if !st.IsDir() {
+			return 1, st.Size()
+		}
+	}
+
+	cnt, size := int64(0), int64(0)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		svr.mg.AppendError(err)
+		return cnt, size
+	}
+
+	for _, ent := range entries {
+		if ent.IsDir() {
+			c, s := svr.CalcUploadFile(ctx, filepath.Join(dir, ent.Name()))
+			select {
+			case <-ctx.Done():
+				return cnt, size
+			default:
+			}
+			cnt += c
+			size += s
+		} else {
+			info, err := ent.Info()
+			if err != nil {
+				svr.mg.AppendError(err)
+			} else {
+				cnt++
+				size += info.Size()
+			}
+		}
+	}
+	return cnt, size
 }
 
 func (svr *S3Server) putObject(ctx context.Context, size int64, objectName, localPath string) error {
@@ -561,4 +622,68 @@ func (svr *S3Server) listMultipartUploads(ctx context.Context, prefix string) (m
 	}
 
 	return ret, nil
+}
+
+func (svr *S3Server) erofsUpload(ctx context.Context, filePath, objectName string) {
+	tempDir, err := os.MkdirTemp("", "ero")
+	if err != nil {
+		svr.mg.AppendError(err)
+		return
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
+
+	svr.bar.NewCntBar(2, "build ero file")
+	err = ero.WriteErofs(tempDir)
+	if err != nil {
+		svr.mg.AppendError(err)
+		return
+	}
+	_, _ = svr.bar.Write(nil)
+
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		svr.mg.AppendError(err)
+		return
+	}
+	if !stat.IsDir() {
+		svr.mg.AppendError(fmt.Errorf("only support dir"))
+		return
+	}
+
+	if strings.HasSuffix(objectName, "/") || objectName == "" {
+		objectName = filepath.ToSlash(filepath.Join(objectName, filepath.Base(filePath)+".ero"))
+	}
+
+	erofsFileName := "mkfs.erofs"
+	if runtime.GOOS == "windows" {
+		erofsFileName = "mkfs.erofs.exe"
+	}
+
+	cmd := exec.Command(filepath.Join(tempDir, erofsFileName), "-zlz4", filepath.Join(tempDir, filepath.Base(objectName)), filePath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		svr.mg.AppendError(fmt.Errorf("%s %s", err.Error(), out))
+		return
+	}
+	_, _ = svr.bar.Write(nil)
+
+	haveUploads, err := svr.listMultipartUploads(ctx, objectName)
+	if err != nil {
+		svr.mg.AppendError(err)
+		haveUploads = make(map[string]string)
+	}
+
+	stat, err = os.Stat(filepath.Join(tempDir, filepath.Base(objectName)))
+	if err != nil {
+		svr.mg.AppendError(err)
+		return
+	}
+	err = svr.multiUpload(ctx, stat.Size(), objectName, filepath.Join(tempDir, filepath.Base(objectName)), haveUploads[objectName])
+	if err != nil {
+		svr.mg.AppendError(err)
+		return
+	}
+	return
 }

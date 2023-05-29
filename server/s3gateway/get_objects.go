@@ -34,6 +34,21 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 			objectName = objectName + "/"
 		}
 	}
+	if filePath == "." {
+		filePath, _ = os.Getwd()
+	}
+
+	fileCnt, fileTotalSize := int64(0), int64(0)
+	for obj := range svr.ListObjects(ctx, objectName, "") {
+		if !obj.IsDirectory && !strings.HasSuffix(obj.FullPath, "/") {
+			fileCnt++
+			fileTotalSize += int64(obj.Size)
+		}
+	}
+	if fileCnt > 128 && (fileTotalSize/fileCnt) <= 32*1024*1024 {
+		svr.bar.NewCntBar(fileCnt, "download files")
+		svr.bar.SetPrint(false)
+	}
 
 	// filepath: aa/bb/ Object: cc/dd[/..]  -> aa/bb/dd/..
 	// filepath: aa/bb/ Object: cc/dd/[..]  -> aa/bb/..
@@ -48,6 +63,9 @@ func (svr *S3Server) GetObjects(ctx context.Context, filePath, objectName string
 				svr.mg.Add()
 				go func() {
 					defer svr.mg.Done()
+					defer func() {
+						_, _ = svr.bar.Write(nil)
+					}()
 					var localPath string
 					if strings.HasSuffix(filePath, string(os.PathSeparator)) || filePath == "." {
 						if !strings.HasSuffix(originalObjectName, "/") && originalObjectName != "" {
