@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed static/linux_amd64/mkfs.erofs
+//go:embed static/windows_amd64/mkfs.erofs.exe
 var erofs []byte
 
 func WriteErofs(path string) error {
