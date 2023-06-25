@@ -41,8 +41,9 @@ The directory of the dataset has a prefix "dataset/".`,
 			multiBar = cmdbar.NewBar(cmd.OutOrStdout())
 		}
 		erofs, _ := cmd.Flags().GetBool("erofs")
+		retransmit, _ := cmd.Flags().GetBool("retransmit")
 		var svr server.S3Server = s3gateway.NewS3Server(cmd.Context(), host, token, multiBar)
-		err = svr.PutObjects(cmd.Context(), args[0], args[1], erofs)
+		err = svr.PutObjects(cmd.Context(), args[0], args[1], erofs, retransmit)
 		if err != nil {
 			return err
 		}
@@ -54,4 +55,5 @@ func init() {
 	rootCmd.AddCommand(putCmd)
 	putCmd.Flags().BoolP("print", "p", true, "print process bar")
 	putCmd.Flags().BoolP("erofs", "e", false, "erofs upload")
+	putCmd.Flags().BoolP("retransmit", "r", false, "retransmission of files only compares timestamps and does not compare verification codes")
 }

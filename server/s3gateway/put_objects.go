@@ -11,6 +11,7 @@ import (
 	"github.com/hitminer/hitminer-file-manager/util/md5pool"
 	jsoniter "github.com/json-iterator/go"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,7 +37,12 @@ type part struct {
 	Size             int `json:"Size"`
 }
 
-func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string, erofs bool) error {
+type fileInfo struct {
+	FullPath string
+	Info     fs.FileInfo
+}
+
+func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string, erofs bool, retransmit bool) error {
 	// 如果为根目录,则 prefix = "", 开始不能是 /
 	objectName = filepath.ToSlash(objectName)
 	objectName = strings.TrimPrefix(objectName, "/")
@@ -61,14 +67,23 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 		return svr.mg.GetError()
 	}
 
-	fileCnt, fileTotalSize := svr.CalcUploadFile(ctx, filePath)
+	fileCnt, fileTotalSize := int64(0), int64(0)
+	fileChan := make(chan fileInfo, 1)
+	go func(fileChan chan<- fileInfo) {
+		defer close(fileChan)
+		svr.listLocalFile(ctx, filePath, fileChan)
+	}(fileChan)
+	for f := range fileChan {
+		fileCnt++
+		fileTotalSize += f.Info.Size()
+	}
 	if fileCnt > 128 && (fileTotalSize/fileCnt) <= 32*1024*1024 {
 		svr.bar.NewCntBar(fileCnt, "upload files")
 		svr.bar.SetPrint(false)
 	}
 
-	fileChan := make(chan string, 1)
-	go func(fileChan chan<- string) {
+	fileChan = make(chan fileInfo, 1)
+	go func(fileChan chan<- fileInfo) {
 		defer close(fileChan)
 		svr.listLocalFile(ctx, filePath, fileChan)
 	}(fileChan)
@@ -90,8 +105,8 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	// filepath: aa/bb[/..]  Object: cc/dd/  -> cc/dd/bb/..
 	// filepath: aa/bb       Object: cc/dd   -> cc/dd
 	// filepath: aa/bb       Object: cc/dd/  -> cc/dd/bb
-	for fp := range fileChan {
-		fullPath := fp
+	for f := range fileChan {
+		file := f
 		svr.mg.Add()
 		go func() {
 			defer svr.mg.Done()
@@ -99,10 +114,10 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 				_, _ = svr.bar.Write(nil)
 			}()
 			var remotePath string
-			if fullPath == filePath {
+			if file.FullPath == filePath {
 				if strings.HasSuffix(objectName, "/") || objectName == "" {
 					// filepath: aa/bb       Object: cc/dd/  -> cc/dd/bb
-					remotePath = filepath.ToSlash(filepath.Join(objectName, filepath.Base(fullPath)))
+					remotePath = filepath.ToSlash(filepath.Join(objectName, filepath.Base(file.FullPath)))
 				} else {
 					// filepath: aa/bb       Object: cc/dd   -> cc/dd
 					remotePath = filepath.ToSlash(objectName)
@@ -114,25 +129,24 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 					if filepath.Dir(filePath) != "." {
 						p = len(filepath.Dir(filePath))
 					}
-					remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[p:]))
+					remotePath = filepath.ToSlash(filepath.Join(objectName, file.FullPath[p:]))
 				} else {
 					// filepath: aa/bb/[..]  Object: cc/dd   -> cc/dd/..
 					// filepath: aa/bb/[..]  Object: cc/dd/  -> cc/dd/..
 					// filepath: aa/bb[/..]  Object: cc/dd   -> cc/dd/..
-					remotePath = filepath.ToSlash(filepath.Join(objectName, fullPath[len(filePath):]))
+					remotePath = filepath.ToSlash(filepath.Join(objectName, file.FullPath[len(filePath):]))
 				}
 			}
 
-			stat, err := os.Stat(fullPath)
-			if err != nil {
-				svr.mg.AppendError(err)
-				return
-			}
+			stat := file.Info
 
 			// 判断是否上传过
 			if lastUploadInfo, ok := listObjects[remotePath]; ok {
+				if retransmit && stat.ModTime().Before(lastUploadInfo.LastModifiedTime) {
+					return
+				}
 				etag := util.TrimEtag(lastUploadInfo.ETag)
-				f, err := os.Open(fullPath)
+				f, err := os.Open(file.FullPath)
 				if err != nil {
 					svr.mg.AppendError(err)
 					return
@@ -171,13 +185,13 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 			}
 
 			if stat.Size() <= smallFileSize {
-				err := svr.putObject(ctx, stat.Size(), remotePath, fullPath)
+				err := svr.putObject(ctx, stat.Size(), remotePath, file.FullPath)
 				if err != nil {
 					svr.mg.AppendError(err)
 					return
 				}
 			} else {
-				err := svr.multiUpload(ctx, stat.Size(), remotePath, fullPath, haveUploads[remotePath])
+				err := svr.multiUpload(ctx, stat.Size(), remotePath, file.FullPath, haveUploads[remotePath])
 				if err != nil {
 					svr.mg.AppendError(err)
 					return
@@ -191,12 +205,15 @@ func (svr *S3Server) PutObjects(ctx context.Context, filePath, objectName string
 	return svr.mg.GetError()
 }
 
-func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan chan<- string) {
+func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan chan<- fileInfo) {
 	st, err := os.Stat(dir)
 	if err == nil {
 		if !st.IsDir() {
 			select {
-			case fileChan <- dir:
+			case fileChan <- fileInfo{
+				FullPath: dir,
+				Info:     st,
+			}:
 			case <-ctx.Done():
 			}
 			return
@@ -216,52 +233,21 @@ func (svr *S3Server) listLocalFile(ctx context.Context, dir string, fileChan cha
 			default:
 			}
 		} else {
+			info, err := ent.Info()
+			if err != nil {
+				svr.mg.AppendError(err)
+				continue
+			}
 			select {
-			case fileChan <- filepath.Join(dir, ent.Name()):
+			case fileChan <- fileInfo{
+				FullPath: filepath.Join(dir, ent.Name()),
+				Info:     info,
+			}:
 			case <-ctx.Done():
 				return
 			}
 		}
 	}
-}
-
-// CalcUploadFile return file cnt and total file size
-func (svr *S3Server) CalcUploadFile(ctx context.Context, dir string) (int64, int64) {
-	st, err := os.Stat(dir)
-	if err == nil {
-		if !st.IsDir() {
-			return 1, st.Size()
-		}
-	}
-
-	cnt, size := int64(0), int64(0)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		svr.mg.AppendError(err)
-		return cnt, size
-	}
-
-	for _, ent := range entries {
-		if ent.IsDir() {
-			c, s := svr.CalcUploadFile(ctx, filepath.Join(dir, ent.Name()))
-			select {
-			case <-ctx.Done():
-				return cnt, size
-			default:
-			}
-			cnt += c
-			size += s
-		} else {
-			info, err := ent.Info()
-			if err != nil {
-				svr.mg.AppendError(err)
-			} else {
-				cnt++
-				size += info.Size()
-			}
-		}
-	}
-	return cnt, size
 }
 
 func (svr *S3Server) putObject(ctx context.Context, size int64, objectName, localPath string) error {

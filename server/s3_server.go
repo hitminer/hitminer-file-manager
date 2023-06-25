@@ -17,7 +17,7 @@ type Object struct {
 
 type S3Server interface {
 	GetObjects(ctx context.Context, filePath, objectName string) error
-	PutObjects(ctx context.Context, filePath, objectName string, erofs bool) error
+	PutObjects(ctx context.Context, filePath, objectName string, erofs bool, retransmit bool) error
 	ListObjects(ctx context.Context, prefix, delimiter string) <-chan Object
 	MakeDirectory(ctx context.Context, prefix string) error
 	RemoveObjects(ctx context.Context, objectName string, recursive bool) error
